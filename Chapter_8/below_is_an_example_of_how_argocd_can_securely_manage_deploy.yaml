@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+
+kind: ApplicationSet
+
+metadata:
+
+  name: iot-multicluster-deploy
+
+spec:
+
+  generators:
+
+  - clusters: {}
+
+  template:
+
+    metadata:
+
+      name: '{{name}}-iot-app'
+
+    spec:
+
+      project: default
+
+      source:
+
+        repoURL: 'https://github.com/iot-org/multicluster-configs.git'
+
+        targetRevision: main
+
+        path: apps/{{name}}
+
+      destination:
+
+        server: '{{server}}'
+
+        namespace: iot-system
+
+      syncPolicy:
+
+        automated:
+
+          prune: true
+
+          selfHeal: true
+
+        syncOptions:
+
+          - CreateNamespace=true
+
+
+
+This ApplicationSet allows ArgoCD to deploy IoT microservices across multiple Kubernetes clusters securely. The configuration ensures automatic synchronization, healing, and namespace creation while applying the same deployment logic to every connected environment.
+
+
+
+
+
+
+
+
+
+
+
+
+
+8.12 Security and Policy Enforcement
+
+
+Figure 8.9: Security and Policy Enforcement
+
+
+1. Role-Based Access Control (RBAC)

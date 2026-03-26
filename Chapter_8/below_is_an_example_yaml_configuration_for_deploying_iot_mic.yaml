@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+
+kind: Application
+
+metadata:
+
+  name: iot-sensor-deployment
+
+  namespace: argocd
+
+spec:
+
+  project: default
+
+  source:
+
+    repoURL: 'https://github.com/iot-org/iot-sensor-config.git'
+
+    targetRevision: main
+
+    path: environments/staging
+
+  destination:
+
+    server: 'https://kubernetes.default.svc'
+
+    namespace: iot-staging
+
+  syncPolicy:
+
+    automated:
+
+      prune: true
+
+      selfHeal: true
+
+    syncOptions:
+
+      - CreateNamespace=true
+
+
+
+
+
+This configuration instructs ArgoCD to monitor the staging environment branch and automatically synchronize updates. If a container or configuration drifts, ArgoCD automatically corrects it — ensuring IoT microservices stay consistent across environments.
+
+
+
+8.8 Advanced GitOps Workflows
+
+
+
+Figure 8.6: Advanced GitOps Workflows
+
+
+1. Pull-Based Deployment
+
+ArgoCD follows a pull-based model, where the cluster pulls configurations from Git instead of being pushed by an external CI system. This improves security by reducing the need for open cluster endpoints. Each IoT cluster can independently fetch updates, making scaling safer and more efficient.
+
+
+2. Managing Multiple Repositories
+
+IoT applications often consist of multiple microservices, each stored in its own repository. ArgoCD supports multiple repository configurations, allowing separate teams to manage distinct components (like sensors, analytics, and dashboards) while keeping overall synchronization in place.
+
+3. Policy Enforcement

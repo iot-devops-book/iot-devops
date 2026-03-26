@@ -1,0 +1,233 @@
+Python: Automate ArgoCD Sync & Monitor Deployment (IoT Use)
+
+Below is a practical Python script pattern that fits in CI/CD pipelines. It:
+
+Calls ArgoCD API to request a sync of an ArgoCD Application (e.g., IoT edge app),
+
+
+Polls ArgoCD to check sync/health status,
+
+
+Uses simple rules to decide success/failure and optionally triggers a rollback (by reverting Git or calling ArgoCD rollback logic).
+
+
+Notes before using:
+
+Replace ARGOCD_SERVER, TOKEN, APP_NAME, and GIT_REV with your environment values.
+
+
+This script uses ArgoCD’s public REST API; secure the token and run this in a trusted CI job or automation host.
+
+
+#!/usr/bin/env python3
+
+"""
+
+argo_sync_monitor.py
+
+Trigger an ArgoCD application sync and monitor health for IoT rollout automation.
+
+"""
+
+
+
+import requests, time, sys, os
+
+
+
+ARGOCD_SERVER = os.environ.get("ARGOCD_SERVER", "https://argocd.example.com")
+
+ARGOCD_TOKEN = os.environ.get("ARGOCD_TOKEN", "REPLACE_WITH_TOKEN")
+
+APP_NAME = os.environ.get("ARGOCD_APP", "iot-edge-app")
+
+NAMESPACE = os.environ.get("ARGOCD_NS", "argocd")
+
+TIMEOUT = int(os.environ.get("SYNC_TIMEOUT_S", "600"))
+
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_S", "5"))
+
+
+
+HEADERS = {
+
+    "Authorization": f"Bearer {ARGOCD_TOKEN}",
+
+    "Content-Type": "application/json"
+
+}
+
+
+
+def api_post(path, payload):
+
+    url = f"{ARGOCD_SERVER}/api/v1{path}"
+
+    r = requests.post(url, json=payload, headers=HEADERS, verify=True)
+
+    r.raise_for_status()
+
+    return r.json()
+
+
+
+def api_get(path):
+
+    url = f"{ARGOCD_SERVER}/api/v1{path}"
+
+    r = requests.get(url, headers=HEADERS, verify=True)
+
+    r.raise_for_status()
+
+    return r.json()
+
+
+
+def trigger_sync(app_name, prune=True, self_heal=True):
+
+    print(f"[+] Triggering sync for {app_name}")
+
+    payload = {"revision": None, "prune": prune, "selfHeal": self_heal}
+
+    return api_post(f"/applications/{app_name}/sync", payload)
+
+
+
+def get_app_status(app_name):
+
+    return api_get(f"/applications/{app_name}")
+
+
+
+def wait_for_sync(app_name, timeout=TIMEOUT):
+
+    start = time.time()
+
+    while True:
+
+        status = get_app_status(app_name)
+
+        sync_status = status.get("status", {}).get("sync", {}).get("status", "Unknown")
+
+        health_status = status.get("status", {}).get("health", {}).get("status", "Unknown")
+
+        print(f"[i] Sync: {sync_status} | Health: {health_status}")
+
+        if sync_status.lower() == "synced" and health_status.lower() == "healthy":
+
+            print("[+] Application is synced and healthy.")
+
+            return True
+
+        if sync_status.lower() == "synced" and health_status.lower() != "healthy":
+
+            print("[-] Application synced but not healthy.")
+
+            return False
+
+        if time.time() - start > timeout:
+
+            print("[-] Timeout waiting for sync/health.")
+
+            return False
+
+        time.sleep(POLL_INTERVAL)
+
+
+
+def main():
+
+    try:
+
+        # Start sync
+
+        trigger_sync(APP_NAME)
+
+        success = wait_for_sync(APP_NAME)
+
+        if not success:
+
+            print("[!] Sync failed or unhealthy — initiating remediation.")
+
+            # Example remediation: create rollback / alert / call CI to revert change
+
+            # Here, we just fetch history and print last deployed revision
+
+            app = get_app_status(APP_NAME)
+
+            history = api_get(f"/applications/{APP_NAME}/revisions")
+
+            last_rev = history[0] if history else {}
+
+            print("[i] Last revisions:", last_rev)
+
+            sys.exit(2)
+
+        print("[+] Deployment completed successfully.")
+
+        sys.exit(0)
+
+    except requests.HTTPError as e:
+
+        print(f"[ERROR] HTTP error: {e.response.status_code} {e.response.text}")
+
+        sys.exit(3)
+
+    except Exception as e:
+
+        print(f"[ERROR] Unexpected: {e}")
+
+        sys.exit(4)
+
+
+
+if __name__ == "__main__":
+
+    main()
+
+How to use in CI:
+
+Run this as a post-deploy job after CI updates Git (or after CI pushes a new image tag), so ArgoCD will pick up the new desired state.
+
+
+The script polls until the application is healthy or times out. If health checks fail, your CI job can mark the build as failed and trigger rollback logic (e.g., revert Git commit or call ArgoCD to sync to a previous revision).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+10.7 CI Integration for IoT Artifacts
+
+
+
+Figure 10.6: CI Integration for IoT Artifacts
+
+
+1. Build → Artifact → Metadata
+
+A reliable CI pipeline produces both an artifact (firmware image, Docker image, container chart) and machine-readable metadata (version, checksum, build time, supported hardware). Store both artifact and metadata in an artifact repository (S3, Nexus, Artifactory). For IoT, metadata must include device compatibility (board, kernel), signature info, and OTA channel. Downstream systems (OTA servers, ArgoCD) read metadata to validate that the artifact is suitable for a target device group before deploying.
+
+
+
+2. Signing and Verification
+
+Security mandates that every firmware or container image be cryptographically signed during CI. The signing step should run in a secure environment (HSM or vault-backed key) before uploading artifacts. CI should produce a signature file and publish the public key or verification path to device managers. At deployment, OTA clients or cluster controllers verify signatures before applying updates — preventing unauthorized or tampered releases.
+
+3. Promotion Workflows (canary → staged → global)
+
+CI pipelines should create an immutable artifact and then use “promotion” to move it across release channels: canary (small subset), staged (regional group), then global. Promotion is a change in metadata or in GitOps manifests (e.g., point ArgoCD to new image tag). The pipeline must support automated promotion rules and manual gates (approvals) for sensitive updates like firmware that can brick devices.
+
+4. Artifact Traceability and Rollbacks
+
+Store provenance information in artifact metadata: commit SHA, CI job ID, test results, and security scan output. When a rollout has an issue, your pipeline or orchestration layer should be able to locate the previous stable artifact and trigger a coordinated rollback (OTA rollback or ArgoCD rollback). Traceability reduces MTTR and ensures you can always return to a known-good state.
